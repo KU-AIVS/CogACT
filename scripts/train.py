@@ -231,7 +231,7 @@ def train(cfg: TrainConfig) -> None:
     vla.vlm.llm_backbone.llm = get_peft_model(vla.vlm.llm_backbone.llm, peft_config)
     # [선택 사항] LoRA 적용 후 학습 가능한 파라미터 수를 출력하여 OOM 문제가 해결되었는지 확인합니다.
     overwatch.info("LLM Backbone Trainable Parameters after PEFT:")
-    vla.vlm.llm_backbone.print_trainable_parameters()
+    vla.vlm.llm_backbone.llm.print_trainable_parameters()
     # === [여기까지 코드 블록 추가] ===
 
     #-------------
