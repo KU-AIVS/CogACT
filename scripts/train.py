@@ -27,7 +27,7 @@ import torch
 import torch.distributed as dist
 import yaml
 import wandb
-
+from peft import LoraConfig, get_peft_model, TaskType
 from prismatic.overwatch import initialize_overwatch
 from prismatic.util import set_global_seed
 from prismatic.vla import get_vla_dataset_and_collator
@@ -212,7 +212,36 @@ def train(cfg: TrainConfig) -> None:
     # [Explicit] Call to `freeze_backbones` here for clarity =>> will log exactly what is/is not frozen
     overwatch.info(f"Invoking `VLM.freeze_backbones()` for `{vla_id}` => Stage: `{stage}`")
     vla.freeze_backbones(stage)
+    #modify es
+    # === [아래 코드 블록을 여기에 추가] ===
+    overwatch.info("Applying PEFT (LoRA) to LLM Backbone to reduce memory...")
+    # LoRA 설정을 정의합니다. (LLaMa 모델의 표준적인 target_modules 사용)
+    peft_config = LoraConfig(
+        r=16,  # LoRA 랭크 (숫자가 클수록 파라미터가 많아짐)
+        lora_alpha=32,  # Alpha 스케일링
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # LLaMa 어텐션 레이어 타겟
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,  # 태스크 타입 지정
+    )
 
+    # vla.vlm.llm_backbone을 PeftModel로 래핑합니다.
+    # 이 함수는 자동으로 LLM 백본의 기존 파라미터를 동결(freeze)시키고,
+    # LoRA 어댑터 파라미터만 학습 가능(trainable)하게 만듭니다.
+    vla.vlm.llm_backbone = get_peft_model(vla.vlm.llm_backbone, peft_config)
+
+    # [선택 사항] LoRA 적용 후 학습 가능한 파라미터 수를 출력하여 OOM 문제가 해결되었는지 확인합니다.
+    overwatch.info("LLM Backbone Trainable Parameters after PEFT:")
+    vla.vlm.llm_backbone.print_trainable_parameters()
+    # === [여기까지 코드 블록 추가] ===
+
+    # Print number of total/trainable model parameters
+    num_params = sum(p.numel() for p in vla.parameters())
+    #
+    num_trainable_params = sum(p.numel() for p in vla.parameters() if p.requires_grad)
+    overwatch.info(
+        # ... (기존 코드)
+    #-------------
     # Print number of total/trainable model parameters
     num_params = sum(p.numel() for p in vla.parameters())
     num_trainable_params = sum(p.numel() for p in vla.parameters() if p.requires_grad)
