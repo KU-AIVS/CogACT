@@ -235,12 +235,6 @@ def train(cfg: TrainConfig) -> None:
     vla.vlm.llm_backbone.print_trainable_parameters()
     # === [여기까지 코드 블록 추가] ===
 
-    # Print number of total/trainable model parameters
-    num_params = sum(p.numel() for p in vla.parameters())
-    #
-    num_trainable_params = sum(p.numel() for p in vla.parameters() if p.requires_grad)
-    overwatch.info(
-        # ... (기존 코드)
     #-------------
     # Print number of total/trainable model parameters
     num_params = sum(p.numel() for p in vla.parameters())
