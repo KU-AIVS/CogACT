@@ -53,11 +53,11 @@ class CogACT(nn.Module):
         **kwargs,
     ) -> None:
         super().__init__()
-
-        self.action_model = ActionModel(model_type = action_model_type,
-                                            token_size = token_size,
-                                            in_channels = action_dim,
-                                            future_action_window_size = future_action_window_size,
+        
+        self.action_model = ActionModel(model_type = action_model_type, 
+                                            token_size = token_size, 
+                                            in_channels = action_dim, 
+                                            future_action_window_size = future_action_window_size, 
                                             past_action_window_size = past_action_window_size)
         self.vlm = vlm
         self.future_action_window_size = future_action_window_size
@@ -83,15 +83,15 @@ class CogACT(nn.Module):
             keys.append("vlm." + module_keys)
         keys += self._trainable_module_keys
         return keys
-
+    
     @property
     def llm_backbone(self) -> LLMBackbone:
         return self.vlm.llm_backbone
-
+    
     @property
     def vision_backbone(self) -> VisionBackbone:
         return self.vlm.vision_backbone
-
+    
     def freeze_backbones(self, stage):
         self.vlm.freeze_backbones(stage)
 
@@ -112,7 +112,7 @@ class CogACT(nn.Module):
         action_masks = None,
     ) -> Tuple:
         """Run a forward pass through the VLM, returning a CausalLMOutputWithPast instance (contains loss)."""
-
+        
         output: CausalLMOutputWithPast = self.vlm(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -136,18 +136,18 @@ class CogACT(nn.Module):
             num_patch = self.vlm.vision_backbone.siglip_featurizer.patch_embed.num_patches
         else:
             raise ValueError("No vision backbone found")
-
+        
         last_hidden = last_hidden[:, num_patch :]
 
         # extract the cognition feature
         cumulative_sum = attention_mask.cumsum(dim=1)
-        last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)
-        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_hidden.size(-1))
+        last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)  
+        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_hidden.size(-1))  
         cognition_features = last_hidden.gather(1, expanded_indices.unsqueeze(1))  # [B, 1, D]
 
         actions_history = actions[:,0:self.past_action_window_size,:]
         actions_future = actions[:, -(self.future_action_window_size+1):, :]
-
+        
         # Repeat 'actions' 'repeated_diffusion_steps' times, resulting in [repeated_diffusion_steps*B, T, D]
         actions_repeated = actions_future.repeat(repeated_diffusion_steps, 1, 1)
         actions_history_repeated = actions_history.repeat(repeated_diffusion_steps, 1, 1)
@@ -204,6 +204,7 @@ class CogACT(nn.Module):
         norm_stats = None,
         **kwargs,
     ) -> CogACT:
+        device_id = torch.device(f"cuda:{torch.cuda.current_device()}")
 
         # Load VLM backbone, borrowed from PrismaticVLM
         vlm = PrismaticVLM(
@@ -213,7 +214,7 @@ class CogACT(nn.Module):
             enable_mixed_precision_training=enable_mixed_precision_training,
             arch_specifier=arch_specifier,
             **kwargs,
-        )
+        ).to(device_id)
 
         # 1. (수정) VLM을 먼저 생성합니다 (LLM은 아직 plain 상태)
         vlm = PrismaticVLM(
@@ -223,10 +224,10 @@ class CogACT(nn.Module):
             enable_mixed_precision_training=enable_mixed_precision_training,
             arch_specifier=arch_specifier,
             **kwargs,
-        )
+        ).to(device_id)
 
         # 2. (수정) 체크포인트 state_dict를 불러옵니다.
-        model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
+        model_state_dict = torch.load(pretrained_checkpoint, map_location=device_id)["model"]
 
         # 3. (수정) Projector와 Vision Backbone 가중치를 먼저 로드합니다. (LLM은 제외)
         assert "projector" in model_state_dict, "Checkpoint 'projector' key missing!"
@@ -243,7 +244,7 @@ class CogACT(nn.Module):
                         action_model_type=action_model_type,
                         use_ema=use_ema,
                         norm_stats=norm_stats,
-                        )
+                        ).to(device_id)
 
         # 5. (수정) 님의 요청대로, CogACT가 된 후에 LoRA를 적용합니다.
         # 체크포인트 키를 확인하여 LoRA 모델인지 감지

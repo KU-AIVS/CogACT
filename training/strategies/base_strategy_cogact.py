@@ -320,7 +320,7 @@ class TrainingStrategy(ABC):
 
                 # Commit Loss =>> Backward!
                 metrics.commit(loss=loss)
-
+                
                 normalized_loss = loss / self.grad_accumulation_steps
                 normalized_loss.backward()
 

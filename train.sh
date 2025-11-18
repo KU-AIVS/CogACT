@@ -1,19 +1,18 @@
 #!/bin/sh
 
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 torchrun --standalone --nnodes 1 --nproc-per-node 1 scripts/train.py \
- --pretrained_checkpoint  /dev/hdd/es/CogACT/pretrain/CogACT-Base/checkpoints/CogACT-Base.pt\
+ --pretrained_checkpoint  /home/ubuntu/robot/pretrained_model/CogACT-Base/checkpoints/CogACT-Base.pt\
  --vla.type prism-dinosiglip-224px+oxe+diffusion\
  --vla.data_mix custom_finetuning\
  --vla.expected_world_size 1\
  --vla.global_batch_size 32\
  --vla.per_device_batch_size 32\
  --vla.learning_rate 2e-5\
- --data_root_dir /dev/hdd/es/dataset\
- --run_root_dir /dev/hdd/es/CogACT/result\
- --run_id Cogact-base-finetune_26\
+ --data_root_dir /home/ubuntu/robot/dataset\
+ --run_root_dir /home/ubuntu/robot/CogACT/result\
+ --run_id Cogact-base-finetune-server\
  --image_aug False\
- --wandb_project CogACT_26\
+ --wandb_project CogACT\
  --wandb_entity es4402\
  --save_interval 10000\
  --repeated_diffusion_steps 8\

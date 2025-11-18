@@ -171,7 +171,7 @@ def train(cfg: TrainConfig) -> None:
                         future_action_window_size=cfg.future_action_window_size,
                         past_action_window_size=cfg.past_action_window_size,
                         use_ema=cfg.use_ema,
-                        )
+                        ).cuda()
 
     else:
         vlm = load(cfg.vla.base_vlm, hf_token=hf_token, load_for_training=True)

@@ -437,6 +437,6 @@ def load_vla(
         freeze_weights=not load_for_training,
         norm_stats=norm_stats,
         **kwargs,
-    )
+    ).to(device_id)
 
     return vla

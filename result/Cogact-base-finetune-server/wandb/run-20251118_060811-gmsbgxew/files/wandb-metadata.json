@@ -1,0 +1,80 @@
+{
+  "os": "Linux-5.15.0-130-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.10.19",
+  "startedAt": "2025-11-18T06:08:11.876594Z",
+  "args": [
+    "--pretrained_checkpoint",
+    "/home/ubuntu/robot/pretrained_model/CogACT-Base/checkpoints/CogACT-Base.pt",
+    "--vla.type",
+    "prism-dinosiglip-224px+oxe+diffusion",
+    "--vla.data_mix",
+    "custom_finetuning",
+    "--vla.expected_world_size",
+    "1",
+    "--vla.global_batch_size",
+    "32",
+    "--vla.per_device_batch_size",
+    "32",
+    "--vla.learning_rate",
+    "2e-5",
+    "--data_root_dir",
+    "/home/ubuntu/robot/dataset",
+    "--run_root_dir",
+    "/home/ubuntu/robot/CogACT/result",
+    "--run_id",
+    "Cogact-base-finetune-server",
+    "--image_aug",
+    "False",
+    "--wandb_project",
+    "CogACT",
+    "--wandb_entity",
+    "es4402",
+    "--save_interval",
+    "10000",
+    "--repeated_diffusion_steps",
+    "8",
+    "--future_action_window_size",
+    "15",
+    "--action_model_type",
+    "DiT-B",
+    "--is_resume",
+    "False",
+    "--vla.epochs",
+    "60"
+  ],
+  "program": "/home/ubuntu/robot/CogACT/scripts/train.py",
+  "codePath": "scripts/train.py",
+  "codePathLocal": "scripts/train.py",
+  "git": {
+    "remote": "https://github.com/KU-AIVS/CogACT.git",
+    "commit": "65772d2f55d426754f968355a67a8ff5d770b1cb"
+  },
+  "email": "es4402@korea.ac.kr",
+  "root": "/home/ubuntu/robot/CogACT/result/Cogact-base-finetune-server",
+  "host": "jbs",
+  "executable": "/home/ubuntu/anaconda3/envs/cogact/bin/python3.10",
+  "cpu_count": 16,
+  "cpu_count_logical": 16,
+  "gpu": "NVIDIA H100 NVL",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "519079956480",
+      "used": "282398609408"
+    }
+  },
+  "memory": {
+    "total": "33648197632"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA H100 NVL",
+      "memoryTotal": "100485038080",
+      "cudaCores": 16896,
+      "architecture": "Hopper",
+      "uuid": "GPU-2e004c76-32e8-e374-47d0-a6b00edfe1d9"
+    }
+  ],
+  "cudaVersion": "12.8",
+  "writerId": "pa93g47xog28jpd3kyjorcfrbrxin1bz"
+}
