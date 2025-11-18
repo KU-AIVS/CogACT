@@ -438,13 +438,5 @@ def load_vla(
         norm_stats=norm_stats,
         **kwargs,
     )
-    # overwatch.info(f"Loading 30.5GB Checkpoint `state_dict` directly to `{device_id}` (Bypassing RAM)...")
-    # state_dict = torch.load(checkpoint_pt, map_location=device_id)
-    # overwatch.info("Checkpoint successfully loaded to VRAM.")
-    #
-    #
-    # # 5. Load State Dict into VLA Shell (both are on VRAM)
-    # vla.load_state_dict(state_dict)
-    # overwatch.info("State dict successfully loaded into VLA model.")
 
     return vla

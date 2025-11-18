@@ -137,6 +137,7 @@ class FSDPStrategy(TrainingStrategy):
 
                 # Save Checkpoint & Copy Latest to `latest-checkpoint.pt`
                 torch.save({"model": model_state_dicts}, checkpoint_path)
+                del model_state_dicts
             dist.barrier()
             optim_state_dict = FSDP.optim_state_dict(self.vlm, self.optimizer)
             if overwatch.is_rank_zero():
@@ -150,8 +151,12 @@ class FSDPStrategy(TrainingStrategy):
                 }
                 torch.save(optimizer_checkpoint, optimizer_path)
                 overwatch.info(f"Saved optimizer state dict to {optimizer_path}")
+                torch.cuda.empty_cache()
                 # TODO (siddk) :: This breaks w/ Sagemaker default permissions (root vs. <user>)... skip?
                 # shutil.copy(checkpoint_path, checkpoint_dir / "latest-checkpoint.pt")
+                del optimizer_checkpoint
+
+
 
     def _get_optimizer_path(self, checkpoint_path: Path) -> Path:
         """Get the path to the optimizer checkpoint file."""

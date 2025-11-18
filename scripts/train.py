@@ -27,7 +27,7 @@ import torch
 import torch.distributed as dist
 import yaml
 import wandb
-from peft import LoraConfig, get_peft_model, TaskType
+from peft import LoraConfig, get_peft_model, TaskType # <--- 이 줄 다시 추가
 from prismatic.overwatch import initialize_overwatch
 from prismatic.util import set_global_seed
 from prismatic.vla import get_vla_dataset_and_collator
@@ -62,7 +62,8 @@ class TrainConfig:
     run_root_dir: Path = Path("runs")                               # Path to directory to store logs & checkpoints
 
     # Resume Run Parameters
-    pretrained_checkpoint: Optional[Union[str, Path]] = None                  # Absolute Path to Checkpoint
+    # pretrained_checkpoint: Optional[Union[str, Path]] = None                  # Absolute Path to Checkpoint
+    pretrained_checkpoint: Optional[Path] = None                  # Absolute Path to Checkpoint
     is_resume: bool = True                                          # Whether we are continuing a prior training run
                                                                     # (only applicable given pretrained checkpoint)
     resume_step: Optional[int] = None                               # Global Step to Resume (should match checkpoint)
@@ -84,9 +85,9 @@ class TrainConfig:
     wandb_project: str = ""                                         # Name of W&B project to log to (use default!)
     wandb_entity: str = ""                                          # Name of entity to log under
     repeated_diffusion_steps: int = 8                               # Repeated steps for training action model (a diffusion model)
-    load_all_data_for_training: bool = True                         # Load all training data 
+    load_all_data_for_training: bool = True                         # Load all training data
     future_action_window_size: int = 15                             # Action chunking, predicting future actions + current action
-    past_action_window_size: int = 0                                # Action history window size, not used now, set to be 0 
+    past_action_window_size: int = 0                                # Action history window size, not used now, set to be 0
     action_model_type: str = 'DiT-B'                                # Action model type, chose from ['DiT-S', 'DiT-B', 'DiT-L']
     use_ema: bool = False                                           # EMA version of action model
     action_dim: int = 7                                             # Dimension of action space
@@ -147,7 +148,7 @@ def train(cfg: TrainConfig) -> None:
         with open(run_dir / "config.yaml", "r") as f_yaml, open(run_dir / "config.json", "w") as f_json:
             yaml_cfg = yaml.safe_load(f_yaml)
             json.dump(yaml_cfg, f_json, indent=2)
-    
+
     dist.barrier()
     # Load VLA checkpoint (if resuming from training) or Base VLM otherwise (from `cfg.vla.base_vlm` ID or Path)
     #   =>> Note :: Verifies that all parameters are loaded in FP32 on load!
@@ -156,15 +157,16 @@ def train(cfg: TrainConfig) -> None:
         # [Validate] Pretrained Checkpoint `step` and `epoch` should match `resume_step` and `resume_epoch`
         #   =>> Note :: We make developers pass in `resume_*` arguments as an extra sanity check!
         if cfg.is_resume:
-            assert int(re.search("step-(.+?)-", cfg.pretrained_checkpoint.name).group(1)) == cfg.resume_step
-            assert int(re.search("epoch-(.+?)-", cfg.pretrained_checkpoint.name).group(1)) == cfg.resume_epoch
+            checkpoint_path = Path(cfg.pretrained_checkpoint)  # <--- 이 줄 추가
+            assert int(re.search("step-(.+?)-", checkpoint_path.name).group(1)) == cfg.resume_step  # <--- 변수명 수정
+            assert int(re.search("epoch-(.+?)-", checkpoint_path.name).group(1)) == cfg.resume_epoch  # <--- 변수명 수정
         overwatch.info("Loading VLA Checkpoint")
         if cfg.use_ema:
             overwatch.info("Loading EMA of Diffusion")
-        vla = load_vla(cfg.pretrained_checkpoint, 
-                        hf_token=hf_token, 
-                        load_for_training=True, 
-                        action_model_type=cfg.action_model_type, 
+        vla = load_vla(cfg.pretrained_checkpoint,
+                        hf_token=hf_token,
+                        load_for_training=True,
+                        action_model_type=cfg.action_model_type,
                         action_dim=cfg.action_dim,
                         future_action_window_size=cfg.future_action_window_size,
                         past_action_window_size=cfg.past_action_window_size,
@@ -176,7 +178,7 @@ def train(cfg: TrainConfig) -> None:
         overwatch.info("Creating VLA from Base VLM")
         if cfg.use_ema:
             overwatch.info("Creating EMA for Diffusion")
-        vla = CogACT(vlm, 
+        vla = CogACT(vlm,
                             action_model_type=cfg.action_model_type,
                             action_dim=cfg.action_dim,
                             future_action_window_size=cfg.future_action_window_size,
@@ -211,30 +213,30 @@ def train(cfg: TrainConfig) -> None:
 
     # [Explicit] Call to `freeze_backbones` here for clarity =>> will log exactly what is/is not frozen
     overwatch.info(f"Invoking `VLM.freeze_backbones()` for `{vla_id}` => Stage: `{stage}`")
-    vla.freeze_backbones(stage)
-    #modify es
-    # === [아래 코드 블록을 여기에 추가] ===
-    overwatch.info("Applying PEFT (LoRA) to LLM Backbone to reduce memory...")
-    # LoRA 설정을 정의합니다. (LLaMa 모델의 표준적인 target_modules 사용)
-    peft_config = LoraConfig(
-        r=16,  # LoRA 랭크 (숫자가 클수록 파라미터가 많아짐)
-        lora_alpha=32,  # Alpha 스케일링
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # LLaMa 어텐션 레이어 타겟
-        lora_dropout=0.05,
-        bias="none",
-        task_type=TaskType.CAUSAL_LM,  # 태스크 타입 지정
-    )
+    is_lora_model = hasattr(vla.vlm.llm_backbone.llm, "base_model")
 
-    # vla.vlm.llm_backbone을 PeftModel로 래핑합니다.
-    # 이 함수는 자동으로 LLM 백본의 기존 파라미터를 동결(freeze)시키고,
-    # LoRA 어댑터 파라미터만 학습 가능(trainable)하게 만듭니다.
-    vla.vlm.llm_backbone.llm = get_peft_model(vla.vlm.llm_backbone.llm, peft_config)
-    # [선택 사항] LoRA 적용 후 학습 가능한 파라미터 수를 출력하여 OOM 문제가 해결되었는지 확인합니다.
-    overwatch.info("LLM Backbone Trainable Parameters after PEFT:")
-    vla.vlm.llm_backbone.llm.print_trainable_parameters()
-    # === [여기까지 코드 블록 추가] ===
+    # 2. "full-finetune"이고 LoRA 모델인 경우:
+    #    LLM을 제외한 나머지만 freeze_backbones 로직을 따르고,
+    #    LLM은 PeftModel이 동결시킨 상태를 유지합니다. (base_model은 동결, lora 어댑터만 학습)
+    if stage == "full-finetune" and is_lora_model:
+        overwatch.info("LoRA model detected during full-finetune. Freezing components manually.")
 
-    #-------------
+        # Vision, Projector는 unfreeze
+        vla.vlm.vision_backbone.requires_grad_(True)  # <--- 여기를 수정
+        vla.vlm.projector.requires_grad_(True)  # <--- 여기를 수정
+        # ActionModel은 항상 학습 대상이므로 unfreeze
+        vla.action_model.requires_grad_(True)
+
+        # LLM은 PeftModel이 설정한 requires_grad 상태를 그대로 둡니다.
+        # (vla.vlm.llm_backbone.unfreeze()를 호출하지 *않습니다*)
+        overwatch.info("LLM backbone base parameters remain frozen by PEFT.")
+
+    else:
+        # 3. LoRA 모델이 아니거나 "full-finetune"이 아닌 경우, 원래 로직을 그대로 따릅니다.
+        vla.freeze_backbones(stage)
+    # === [ (중요) 수정 완료 ] ===
+
+
     # Print number of total/trainable model parameters
     num_params = sum(p.numel() for p in vla.parameters())
     num_trainable_params = sum(p.numel() for p in vla.parameters() if p.requires_grad)

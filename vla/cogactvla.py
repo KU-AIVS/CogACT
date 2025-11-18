@@ -29,6 +29,7 @@ from prismatic.util.nn_utils import FusedMLPProjector, LinearProjector, MLPProje
 
 from action_model.action_model import ActionModel
 from action_model.models import DiT
+from peft import LoraConfig, TaskType, get_peft_model # <--- 이 줄을 추가하세요
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
@@ -52,11 +53,11 @@ class CogACT(nn.Module):
         **kwargs,
     ) -> None:
         super().__init__()
-        
-        self.action_model = ActionModel(model_type = action_model_type, 
-                                            token_size = token_size, 
-                                            in_channels = action_dim, 
-                                            future_action_window_size = future_action_window_size, 
+
+        self.action_model = ActionModel(model_type = action_model_type,
+                                            token_size = token_size,
+                                            in_channels = action_dim,
+                                            future_action_window_size = future_action_window_size,
                                             past_action_window_size = past_action_window_size)
         self.vlm = vlm
         self.future_action_window_size = future_action_window_size
@@ -82,15 +83,15 @@ class CogACT(nn.Module):
             keys.append("vlm." + module_keys)
         keys += self._trainable_module_keys
         return keys
-    
+
     @property
     def llm_backbone(self) -> LLMBackbone:
         return self.vlm.llm_backbone
-    
+
     @property
     def vision_backbone(self) -> VisionBackbone:
         return self.vlm.vision_backbone
-    
+
     def freeze_backbones(self, stage):
         self.vlm.freeze_backbones(stage)
 
@@ -111,7 +112,7 @@ class CogACT(nn.Module):
         action_masks = None,
     ) -> Tuple:
         """Run a forward pass through the VLM, returning a CausalLMOutputWithPast instance (contains loss)."""
-        
+
         output: CausalLMOutputWithPast = self.vlm(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -135,18 +136,18 @@ class CogACT(nn.Module):
             num_patch = self.vlm.vision_backbone.siglip_featurizer.patch_embed.num_patches
         else:
             raise ValueError("No vision backbone found")
-        
+
         last_hidden = last_hidden[:, num_patch :]
 
         # extract the cognition feature
         cumulative_sum = attention_mask.cumsum(dim=1)
-        last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)  
-        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_hidden.size(-1))  
+        last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)
+        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_hidden.size(-1))
         cognition_features = last_hidden.gather(1, expanded_indices.unsqueeze(1))  # [B, 1, D]
 
         actions_history = actions[:,0:self.past_action_window_size,:]
         actions_future = actions[:, -(self.future_action_window_size+1):, :]
-        
+
         # Repeat 'actions' 'repeated_diffusion_steps' times, resulting in [repeated_diffusion_steps*B, T, D]
         actions_repeated = actions_future.repeat(repeated_diffusion_steps, 1, 1)
         actions_history_repeated = actions_history.repeat(repeated_diffusion_steps, 1, 1)
@@ -214,34 +215,63 @@ class CogACT(nn.Module):
             **kwargs,
         )
 
-        # Load from Checkpoint (Custom --> should load both *projector* and *llm* weights)
-        model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
-        assert (
-            "projector" in model_state_dict and "llm_backbone" in model_state_dict
-        ), "PrismaticVLM `from_pretrained` expects checkpoint with keys for `projector` AND `llm_backbone`!"
+        # 1. (수정) VLM을 먼저 생성합니다 (LLM은 아직 plain 상태)
+        vlm = PrismaticVLM(
+            model_id,
+            vision_backbone,
+            llm_backbone,
+            enable_mixed_precision_training=enable_mixed_precision_training,
+            arch_specifier=arch_specifier,
+            **kwargs,
+        )
 
+        # 2. (수정) 체크포인트 state_dict를 불러옵니다.
+        model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
+
+        # 3. (수정) Projector와 Vision Backbone 가중치를 먼저 로드합니다. (LLM은 제외)
+        assert "projector" in model_state_dict, "Checkpoint 'projector' key missing!"
         vlm.projector.load_state_dict(model_state_dict["projector"])
-        vlm.llm_backbone.load_state_dict(model_state_dict["llm_backbone"])
         if "vision_backbone" in model_state_dict.keys():
             vlm.vision_backbone.load_state_dict(model_state_dict["vision_backbone"])
 
-        # Freeze Weights
-        if freeze_weights:
-            vlm.requires_grad_(False)
-            vlm.eval()
-
-        # Initialize CogACT
+        # 4. (수정) 님의 요청대로, VLM을 CogACT로 래핑합니다.
         cogact = CogACT(vlm,
-                        token_size = vlm.llm_backbone.llm.lm_head.in_features,
-                        action_dim = action_dim,
-                        future_action_window_size = future_action_window_size,
-                        past_action_window_size = past_action_window_size,
-                        action_model_type = action_model_type,
-                        use_ema = use_ema,
-                        norm_stats = norm_stats,
+                        token_size=vlm.llm_backbone.llm.lm_head.in_features,
+                        action_dim=action_dim,
+                        future_action_window_size=future_action_window_size,
+                        past_action_window_size=past_action_window_size,
+                        action_model_type=action_model_type,
+                        use_ema=use_ema,
+                        norm_stats=norm_stats,
                         )
 
-        # Load ActionModel from Checkpoint
+        # 5. (수정) 님의 요청대로, CogACT가 된 후에 LoRA를 적용합니다.
+        # 체크포인트 키를 확인하여 LoRA 모델인지 감지
+        is_lora_checkpoint = any("lora_A" in k for k in model_state_dict.get("llm_backbone", {}))
+
+        if is_lora_checkpoint:
+            overwatch.info("LoRA checkpoint detected. Applying PEFT to CogACT's LLM backbone...")
+            # train.py와 동일한 LoRA 설정 적용
+            lora_config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                lora_dropout=0.05,
+                bias="none",
+                task_type=TaskType.CAUSAL_LM,
+                target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            )
+            # CogACT 내부의 LLM을 PeftModel로 변환
+            cogact.vlm.llm_backbone.llm = get_peft_model(cogact.vlm.llm_backbone.llm, lora_config)
+            overwatch.info("LLM Backbone successfully converted to PeftModel.")
+
+        # 6. (수정) 님의 요청대로, 그 뒤에 LLM 체크포인트를 적용합니다.
+        if "llm_backbone" in model_state_dict:
+            cogact.vlm.llm_backbone.load_state_dict(model_state_dict["llm_backbone"])
+            overwatch.info("LLM backbone state dict loaded successfully.")
+        else:
+            overwatch.warning("No 'llm_backbone' state dict found in checkpoint.")
+
+        # 7. (수정) ActionModel 가중치를 로드합니다.
         if "action_model" in model_state_dict:
             cogact.action_model.load_state_dict(model_state_dict["action_model"])
             if "ema_diffusion" in model_state_dict and use_ema:
@@ -250,6 +280,11 @@ class CogACT(nn.Module):
                 cogact.ema_diffusion.load_state_dict(model_state_dict["action_model"])
         else:
             overwatch.warning("No ActionModel found in the pretrained checkpoint. Initializing a new one.")
+
+        # 8. Freeze Weights (추론용)
+        if freeze_weights:
+            cogact.requires_grad_(False)
+            cogact.eval()
         return cogact        
 
     @torch.inference_mode()

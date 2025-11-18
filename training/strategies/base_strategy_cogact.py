@@ -234,6 +234,7 @@ class TrainingStrategy(ABC):
                         # Check for Termination & Save Final Checkpoint (in case `max_steps` is not None)
                         if self.max_steps is not None and metrics.global_step >= self.max_steps:
                             self.save_checkpoint(metrics.run_dir, metrics.global_step, epoch, loss.item())
+                            torch.cuda.empty_cache()
                             dist.barrier()
 
                             return
@@ -291,6 +292,7 @@ class TrainingStrategy(ABC):
             #   => This means looping over the DataLoader is basically "infinite" (so no outer loop over epochs).
             #      Slightly breaks default PyTorch semantics, which is why we adaptively compute `epoch` below.
             for train_idx, batch in enumerate(dataloader):
+                torch.cuda.empty_cache()
                 # Note that we'll unpack batch (and let AMP/FSDP do its thing) in the VLM.forward() call
                 #   => Basically, if we're using mixed precision (or not), autocast()/FSDP will move to device!
                 with torch.autocast(
@@ -318,7 +320,7 @@ class TrainingStrategy(ABC):
 
                 # Commit Loss =>> Backward!
                 metrics.commit(loss=loss)
-                
+
                 normalized_loss = loss / self.grad_accumulation_steps
                 normalized_loss.backward()
 
@@ -348,8 +350,9 @@ class TrainingStrategy(ABC):
                         self.save_checkpoint(
                             metrics.run_dir, metrics.global_step, epoch, loss.item(), only_trainable=not save_full_model
                         )
-                        dist.barrier()
 
+                        dist.barrier()
+                        torch.cuda.empty_cache()
                     if terminate:
                         return
 
